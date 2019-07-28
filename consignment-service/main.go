@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/micro/go-micro"
 	pb "github.com/sisimogangg/shippy/consignment-service/proto"
+	vesselProto "github.com/sisimogangg/shippy/vessel-service/proto/vessel"
 )
 
 // Import the generated protobuf code
@@ -42,10 +44,26 @@ func (repo *Repository) GetAll() []*pb.Consignment {
 }
 
 type service struct {
-	repo repository
+	repo         repository
+	vesselClient vesselProto.VesselServiceClient
 }
 
 func (s *service) CreateConsignment(ctx context.Context, req *pb.Consignment, res *pb.Response) error {
+
+	// Here we call a client instance of our vessel service with our consignment weight,
+	// and the amount of containers as the capacity value
+	vesselResponse, err := s.vesselClient.FindAvailable(context.Background(), &vesselProto.Specification{
+		MaxWeight: req.Weight,
+		Capacity:  int32(len(req.Containers)),
+	})
+	log.Printf("Found vessel: %s \n", vesselResponse.Vessel.Name)
+	if err != nil {
+		return err
+	}
+
+	// We set the VesselId as the vessel we got back from our
+	// vessel service
+	req.VesselId = vesselResponse.Vessel.Id
 
 	// Save our consignment
 	consignment, err := s.repo.Create(req)
@@ -70,21 +88,13 @@ func (s *service) GetConsignments(ctx context.Context, req *pb.GetRequest, res *
 func main() {
 	repo := &Repository{}
 
-	// Set-up our gRPC server.
-	/*lis, err := net.Listen("tcp", port)
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-	s := grpc.NewServer()
-	*/
-
-	// Create a new service. Optionally include some options here.
 	srv := micro.NewService(
-		// This name must match the package name given in your protobuf definition
 		micro.Name("go.micro.srv.consignment"),
 	)
 
 	srv.Init()
+
+	vesselClient := vesselProto.NewVesselServiceClient("shippy.service.vessel", srv.Client())
 
 	// Register our service with the gRPC server, this will tie our
 	// implementation into the auto-generated interface code for our
